@@ -1,0 +1,53 @@
+---
+title: "Ohio Cases and Intervention Times"
+author: "Mirai Shah, Gabrielle Ferra, Andres Colubri"
+date: "7/4/2020"
+output: pdf_document
+---
+
+DATA WITH INTERVENTION DATES 
+
+```{r}
+library(ggplot2)
+theme_set(theme_bw())
+```
+
+```{r}
+#data
+us_data <- read.csv(file.path("ohio/mumps_data_per_state.csv"))
+ohio_data <- us_data[us_data$Reporting.Area == 'OHIO', ]
+ohio_data[is.na(ohio_data)] <- 0
+
+ohio_data <- subset(ohio_data, MMWR.Week <= 45)
+
+# week needs to be treated as a factor to allow using discrete x labels
+ohio_data <- data.frame('time' = factor(ohio_data$MMWR.Week),
+                        'cases' = ohio_data$Mumps..Current.week)
+
+ohio_data
+```
+
+```{r}
+#dates of interventions
+
+first_month_week <- c("5", "9", "13", "17", "21", "25", "29", "33", "37", "41")
+month_names <- c("Feb", "Mar", "Apr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov")
+
+start_aware_week <- 12
+
+first_month_week
+month_names
+```
+
+```{r}
+ggplot(data=ohio_data, aes(x=time, y=cases, group=1)) + 
+  geom_line() +
+  scale_x_discrete(breaks=first_month_week, labels=month_names) +
+  geom_vline(aes(xintercept = as.numeric(start_aware_week), 
+             colour = 'Awareness campaing & news reporting'), linetype=4) +
+  scale_colour_manual(name = "", values = c('Awareness campaing & news reporting'="chocolate1")) +
+  ggtitle('Outbreak at Ohio State University') +
+  theme(legend.position="bottom")
+
+ggsave(file.path("ohio", "interventions.pdf"))
+```

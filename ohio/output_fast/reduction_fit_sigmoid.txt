@@ -1,0 +1,20 @@
+
+Call:
+lm(formula = red_size ~ time, data = data.frame(time = seq(1, 
+    start_aware_week - 1, length = start_aware_week - 1), reduction = red_size))
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-23.471  -4.968   2.061   8.053  11.168 
+
+Coefficients:
+            Estimate Std. Error t value Pr(>|t|)    
+(Intercept)  113.437      7.327  15.483 8.56e-08 ***
+time          -4.406      1.080  -4.078  0.00276 ** 
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 11.33 on 9 degrees of freedom
+Multiple R-squared:  0.6489,	Adjusted R-squared:  0.6099 
+F-statistic: 16.63 on 1 and 9 DF,  p-value: 0.002764
+

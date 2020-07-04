@@ -1,0 +1,101 @@
+---
+title: "Harvard Cases and Intervention Times"
+author: "Mirai Shah, Gabrielle Ferra, Andres Colubri"
+date: "6/1/2020"
+output: pdf_document
+---
+
+DATA WITH INTERVENTION DATES 
+
+```{r}
+library(ggplot2)
+```
+
+```{r}
+#data
+intervention_data <- read.csv(file.path("harvard", "harvard_cases_and_interventions.csv"))
+colnames(intervention_data) <- c("time", "cases", "week", "intervention")
+```
+
+```{r}
+#dates of interventions
+intervention_data[which(intervention_data$intervention == "S"), 1]
+```
+
+```{r}
+#format the dates
+intervention_data$time <- as.Date(strptime(intervention_data$time, "%m/%d/%Y"))
+time_list <- seq(as.Date(strptime("2/15/16", "%m/%d/%Y")), by = "day", length.out = 600)
+other_data = data.frame('time' = time_list, 'cases' = rep(0, 600))
+
+temp = merge(x = other_data, y = intervention_data[,1:2], by = "time", all.x = TRUE)
+temp[is.na(temp)] <- 0
+
+data = data.frame('time' = temp$time, 'cases' = temp$cases.x + temp$cases.y)
+data
+```
+
+```{r}
+#important dates to note 
+intervention_dates = c("0016-02-29", "0016-03-02", "0016-03-07", "0016-03-25",
+                       "0016-04-15", "0016-04-29")
+intervention_indices = c()
+for (i in intervention_dates){
+  intervention_indices = c(intervention_indices, which(data$time == i))
+}
+
+spring_break_dates = c("0016-03-12", "0016-03-20")
+spring_break_indices = c()
+for (i in spring_break_dates){
+  spring_break_indices = c(spring_break_indices, which(data$time == i))
+}
+
+summer_index = which(data$time == '0016-05-25')
+```
+
+DO PLOT OF THE CURVES AND INTERVENTIONS
+
+```{r}
+#plot of Harvard cases
+ggplot(data=subset(data, time <= "0016-07-01"), aes(x=time, y=cases, group=1)) +
+  geom_line(colour='black') + ggtitle('Harvard Outbreak: February-June')
+```
+
+
+```{r}
+#add in important dates
+ggplot(data=subset(data, time <= "0016-07-01"), aes(x=time, y=cases, group=1)) +
+  geom_line() + 
+  geom_vline(aes(xintercept=as.numeric(data$time[15]), 
+                              colour = 'HUHS email'), linetype = 4) +
+  geom_vline(aes(xintercept=as.numeric(data$time[17]), 
+                              colour = 'HUHS email'), linetype = 4) +
+  geom_vline(aes(xintercept=as.numeric(data$time[22]), 
+                              colour = 'HUHS email'), linetype = 4) +
+  geom_vline(aes(xintercept=as.numeric(data$time[40]), 
+                              colour = 'HUHS email'), linetype = 4) +
+  geom_vline(aes(xintercept=as.numeric(data$time[75]), 
+                              colour = 'HUHS email'), linetype = 4) +
+  geom_vline(aes(xintercept=as.numeric(data$time[spring_break_indices[1]]), 
+                              colour = 'school vacation'), linetype = 1) +
+  geom_vline(aes(xintercept=as.numeric(data$time[spring_break_indices[2]]), 
+                              colour = 'school vacation'), linetype = 1) +
+  geom_vline(aes(xintercept=as.numeric(data$time[summer_index]), 
+                              colour = 'school vacation'), linetype = 1) +
+  geom_vline(aes(xintercept=as.numeric(data$time[138]), 
+                              colour = 'school vacation'), linetype = 1) +
+  geom_vline(aes(xintercept = as.numeric(data$time[75-14]), 
+             colour = 'understanding negative PCR tests'), linetype=4) + 
+  scale_colour_manual(name = "", values = c('understanding negative PCR tests'="darkturquoise", 'school vacation'="darkviolet",
+                                                 'HUHS email' = "chocolate1")) +
+  scale_linetype_manual(values=c(PCR_results="twodash", vacation="dotted")) +
+  ggtitle("Timing of Interventions during Harvard Outbreak") +
+  theme(legend.position="bottom") + annotate("rect", xmin = data$time[summer_index], 
+                                             xmax = data$time[138], ymin = 0, ymax = 10,
+        alpha = .2) + annotate("rect", xmin = data$time[spring_break_indices[1]], 
+                                             xmax = data$time[spring_break_indices[2]], ymin = 0, ymax = 10,
+        alpha = .2)
+
+  ggsave(file.path("harvard", "interventions.pdf"))
+  
+```
