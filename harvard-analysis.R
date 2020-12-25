@@ -343,17 +343,18 @@ theta_opt
 # Bootstrap parameters
 
 bootstrap_confidence <- as.numeric(prop$bootstrap_confidence)
+num_quantiles <- as.numeric(prop$num_quantiles)
 num_bootstrap_replicates <- as.integer(prop$num_bootstrap_replicates)
 use_bootstrap_estimates <- as.logical(prop$use_bootstrap_estimates)
 
-# Getting the mean and CI for the parameters (from bootstrapping the top decile of the loglik)
+# Getting the mean and CI for the parameters (from bootstrapping the top quantile of the loglik)
 
-# Calculate deciles
-deciles <- quantile(mle_params$loglik, prob = seq(0, 1, length = 11), type = 5)
-top_decile <- deciles[10][[1]]
+# Calculate quantiles
+quantiles <- quantile(mle_params$loglik, prob = seq(0, 1, length = num_quantiles+1), type = 5)
+top_quantile <- quantiles[num_quantiles][[1]]
 
 # Remove outliers
-mle_params_top <- mle_params[top_decile < mle_params$loglik,]
+mle_params_top <- mle_params[top_quantile < mle_params$loglik,]
 
 theta_boot <- theta_opt
 mle_mean_ci <- NULL

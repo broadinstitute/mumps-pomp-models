@@ -13,3 +13,11 @@ The .Rmd notebooks can be run from within RStudio, using the desired properties 
 ```
 ./run_ohio fast.properties
 ```
+
+### Publication with resutls
+
+The results from these scripts are presented in the following pre-print:
+
+https://www.medrxiv.org/content/10.1101/2020.07.31.20166348v2
+
+~Note:~ The calculations use the "opt" parameter set, so the reported point estimates of the epidemiological parameters correspond to the maximum of the log-likelihood function.
