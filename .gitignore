@@ -3,3 +3,4 @@
 **/*.rds
 **/.Rhistory
 **/*.dylib
+**/*.so
