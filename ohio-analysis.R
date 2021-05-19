@@ -739,26 +739,35 @@ if (calculate_mcap_cis) {
     mdl <- plik(pname=name, pval0=row[1], pval1=row[2])
     
     par_range <- seq(row[1], row[2], length=mcap_profdes_len)
+    par_range_delta <- (row[2] - row[1]) / (2 * (mcap_profdes_len-1))
     log_likelihoods <- c()
     for (val in par_range) {
-      likelihoods <- subset(mdl, abs(mdl[[name]]-val)<1)$loglik
+      likelihoods <- subset(mdl, abs(mdl[[name]]-val)<par_range_delta)$loglik
       if (length(likelihoods) == 0) next
       log_likelihoods <- c(log_likelihoods, max(likelihoods))
     }
     
-    x <- mcap(log_likelihoods, par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
+    par_prof <- data.frame(par_range, log_likelihoods)
+    # Discarding outlier values that are too low
+    Q <- quantile(par_prof$log_likelihoods, probs=c(.25, .75), na.rm = FALSE)
+    iqr <- IQR(par_prof$log_likelihoods)
+    par_prof <- subset(par_prof, par_prof$log_likelihoods > (Q[1] - 1.5*iqr))
+    
+    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
     if (i == 1) {
       cis <- data.frame("name" = c(name), "x0" = c(x$ci[1]), "x1" = c(x$ci[2]), stringsAsFactors = FALSE)  
     } else {
-      cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))  
+      cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))
     }
+    
     print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))    
     
     ggplot(x$fit, aes(parameter, quadratic)) + geom_line() + 
       geom_vline(xintercept=c(x$ci[1], x$ci[2]), linetype=4, colour='red') +
-      geom_point(data = data.frame('parameters'=par_range, 'loglik'=log_likelihoods), 
-                 aes(parameters, log_likelihoods)) 
-    ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))    
+      geom_point(data = data.frame('parameters'=par_prof$par_range, 'loglik'=par_prof$log_likelihoods), 
+                 aes(parameters, par_prof$log_likelihoods)) 
+    ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))
   }
-  write.csv(cis, file=file.path(output_folder, "param_confidence_intervals.csv"), row.names=FALSE, na="")  
+  
+  write.csv(cis, file=file.path(output_folder, "param_mcap_confidence_intervals.csv"), row.names=FALSE, na="")
 }

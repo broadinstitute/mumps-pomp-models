@@ -765,7 +765,7 @@ mcap_ngrid <- list(beta=as.numeric(prop$mcap_ngrid_beta),
 ```{r}
 # Function to calculate the MCAP CIs 
 
-mcap <- function(lp, parameter, confidence, lambda, Ngrid) {
+mcap <- function(lp, parameter, confidence=0.95, lambda=0.75, Ngrid=1000) {
   smooth_fit <- loess(lp ~ parameter, span=lambda)
   parameter_grid <- seq(min(parameter), max(parameter), length.out = Ngrid)
   smoothed_loglik <- predict(smooth_fit, newdata=parameter_grid)
@@ -859,6 +859,22 @@ plik <- function(pname, pval0, pval1) {
 ```
 
 ```{r}
+plot_profile <- function(mcap_data, ylab, xline=2.5, yline=2.5, xlab="", quadratic=FALSE,...) {
+  if(missing(ylab)) ylab <- "log likelihood"
+  ggplot() + geom_point(aes(x = mcap1$parameter, y = mcap1$lp)) + 
+    geom_line(mapping = aes(x = mcap1$fit$parameter, y = mcap1$fit$smoothed),
+              color = "red") +
+    {if(quadratic) geom_line(mapping = aes(x = mcap1$fit$parameter, y = mcap1$fit$quadratic),
+                             color = "blue",
+                             lwd = 1.25)} +
+    labs(x = xlab, y = ylab) +
+    geom_vline(xintercept = mcap1$ci, color = "red") + 
+    geom_hline(yintercept = max(mcap1$fit$smoothed, na.rm = T) - mcap1$delta, color = "red") +
+    theme(panel.border = element_rect(colour = "black", fill=NA))
+}
+```
+
+```{r}
 # Iterate over all the free parameters in the model to calculate their CIs... may take a while!
 
 if (calculate_mcap_cis) {
@@ -871,27 +887,44 @@ if (calculate_mcap_cis) {
     mdl <- plik(pname=name, pval0=row[1], pval1=row[2])
     
     par_range <- seq(row[1], row[2], length=mcap_profdes_len)
+    par_range_delta <- (row[2] - row[1]) / (2 * (mcap_profdes_len-1))
     log_likelihoods <- c()
     for (val in par_range) {
-      likelihoods <- subset(mdl, abs(mdl[[name]]-val)<1)$loglik
+      likelihoods <- subset(mdl, abs(mdl[[name]]-val)<par_range_delta)$loglik
       if (length(likelihoods) == 0) next
       log_likelihoods <- c(log_likelihoods, max(likelihoods))
     }
     
-    x <- mcap(log_likelihoods, par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
+    par_prof <- data.frame(par_range, log_likelihoods)
+    # Discarding outlier values that are too low
+    Q <- quantile(par_prof$log_likelihoods, probs=c(.25, .75), na.rm = FALSE)
+    iqr <- IQR(par_prof$log_likelihoods)
+    par_prof <- subset(par_prof, par_prof$log_likelihoods > (Q[1] - 1.5*iqr))
+    
+    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
     if (i == 1) {
       cis <- data.frame("name" = c(name), "x0" = c(x$ci[1]), "x1" = c(x$ci[2]), stringsAsFactors = FALSE)  
     } else {
-      cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))  
+      cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))
     }
+    
     print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))    
     
     ggplot(x$fit, aes(parameter, quadratic)) + geom_line() + 
       geom_vline(xintercept=c(x$ci[1], x$ci[2]), linetype=4, colour='red') +
-      geom_point(data = data.frame('parameters'=par_range, 'loglik'=log_likelihoods), 
-                 aes(parameters, log_likelihoods)) 
+      geom_point(data = data.frame('parameters'=par_prof$par_range, 'loglik'=par_prof$log_likelihoods), 
+                 aes(parameters, par_prof$log_likelihoods)) 
     ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))
+    
+    # DEBUGGING - In case the outlier removal still yields loglikelihood cliffs and one 
+    # needs to remove values manually. Some discussion here:
+    # https://github.com/kingaa/pomp/discussions/145
+    #par_prof_orig <- data.frame(par_range, log_likelihoods)
+    #print(par_prof_orig)
+    #xdeb <- mcap(par_prof_orig$log_likelihoods, par_prof_orig$par_rang)
+    #plot_profile(xdeb)
+    #ggsave(file.path(plotting_folder, paste("6-", name, "_all_loglik_ci.pdf", sep="")))
   }
-  write.csv(cis, file=file.path(output_folder, "param_confidence_intervals.csv"), row.names=FALSE, na="")  
+  write.csv(cis, file=file.path(output_folder, "param_mcap_confidence_intervals.csv"), row.names=FALSE, na="")  
 }
 ```
