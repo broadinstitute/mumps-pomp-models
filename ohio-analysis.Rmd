@@ -741,9 +741,9 @@ plik <- function(pname, pval0, pval1) {
       melt(id=NULL) %>% 
       daply(~variable, function(x)range(x$value)) -> box
     
-    starts <- profileDesign(pname=seq(pval0, pval1, length=mcap_profdes_len),
-                            lower=box[,1], upper=box[,2],
-                            nprof=mcap_nprof)
+    starts <- profile_design(pname=seq(pval0, pval1, length=mcap_profdes_len),
+                             lower=box[,1], upper=box[,2],
+                             nprof=mcap_nprof)
     names(starts) <- sub("pname", pname,names(starts))
     
     psizes <- perturb_sizes[names(perturb_sizes) != pname]
