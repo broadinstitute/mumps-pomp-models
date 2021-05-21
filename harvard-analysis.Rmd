@@ -876,6 +876,19 @@ plot_profile <- function(mcap_data, ylab, xline=2.5, yline=2.5, xlab="", quadrat
 
 ```{r}
 # Iterate over all the free parameters in the model to calculate their CIs... may take a while!
+logitTransform <- function(p) { 
+  p <- min(0.99999, max(0.00001, p))
+  return(log(p/(1-p)))
+}
+sigmoidTransform <- function(p) { 1/(1+exp(-p)) }
+
+logTransform <- function(p) { 
+  p <- max(0.00001, p)
+  return(log(p))
+}
+expTransform <- function(p) { exp(p) }
+
+transformVals <- TRUE
 
 if (calculate_mcap_cis) {
   par_names <- row.names(free_param_box)
@@ -889,31 +902,57 @@ if (calculate_mcap_cis) {
     par_range <- seq(row[1], row[2], length=mcap_profdes_len)
     par_range_delta <- (row[2] - row[1]) / (2 * (mcap_profdes_len-1))
     log_likelihoods <- c()
+    par_values <- c()
     for (val in par_range) {
       likelihoods <- subset(mdl, abs(mdl[[name]]-val)<par_range_delta)$loglik
       if (length(likelihoods) == 0) next
       log_likelihoods <- c(log_likelihoods, max(likelihoods))
+      
+      if (is.element(name, logit_trans_params) && transformVals) {
+        logitVal <- logitTransform(val)
+        #par_values <- c(par_values, val)
+        par_values <- c(par_values, logitVal)
+      } else if (is.element(name, log_trans_params) && transformVals) {
+        logVal = logTransform(val)
+        par_values <- c(par_values, logVal)
+      } else {
+        par_values <- c(par_values, val)
+      }
     }
+    par_range <- par_values
     
+    #print(data.frame(par_range, par_values, log_likelihoods))
     par_prof <- data.frame(par_range, log_likelihoods)
+    #par_prof <- data.frame(par_values, log_likelihoods)
+
     # Discarding outlier values that are too low
     Q <- quantile(par_prof$log_likelihoods, probs=c(.25, .75), na.rm = FALSE)
     iqr <- IQR(par_prof$log_likelihoods)
     par_prof <- subset(par_prof, par_prof$log_likelihoods > (Q[1] - 1.5*iqr))
     
-    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
+    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, 0.75, mcap_ngrid[[i]])
+    #x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
     if (i == 1) {
       cis <- data.frame("name" = c(name), "x0" = c(x$ci[1]), "x1" = c(x$ci[2]), stringsAsFactors = FALSE)  
     } else {
       cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))
     }
     
-    print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))    
-    
+    if (is.element(name, logit_trans_params) && transformVals) {
+      print(sprintf("%s %0.2f %0.2f", name, sigmoidTransform(x$ci[1]), sigmoidTransform(x$ci[2])))
+      var_label <- paste("logit(", name, ")")
+    } else if (is.element(name, log_trans_params) && transformVals) {
+      print(sprintf("%s %0.2f %0.2f", name, expTransform(x$ci[1]), expTransform(x$ci[2])))
+      var_label <- paste("log(", name, ")")
+    } else {
+      print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))
+      var_label <- name
+    }
+
     ggplot(x$fit, aes(parameter, quadratic)) + geom_line() + 
       geom_vline(xintercept=c(x$ci[1], x$ci[2]), linetype=4, colour='red') +
       geom_point(data = data.frame('parameters'=par_prof$par_range, 'loglik'=par_prof$log_likelihoods), 
-                 aes(parameters, par_prof$log_likelihoods)) 
+                 aes(parameters, par_prof$log_likelihoods)) + xlab(var_label) + ylab("-loglik")
     ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))
     
     # DEBUGGING - In case the outlier removal still yields loglikelihood cliffs and one 

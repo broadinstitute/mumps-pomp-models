@@ -41,7 +41,7 @@ PARAMETERS
 ```{r}
 main_folder <- "./ohio"
 
-prop_file = file.path(main_folder, "fast.properties")
+prop_file = file.path(main_folder, "opt.properties")
 prop <- read.properties(prop_file)
 
 output_name <- prop$output_name
@@ -388,6 +388,75 @@ for (p in free_param_names) {
 
 write.csv(theta_boot, file=file.path(output_folder, "param_bootstrap_estimates.csv"), row.names=TRUE, na="")
 write.csv(mle_mean_ci, file=file.path(output_folder, "param_bootstrap_conf_intervals.csv"), row.names=FALSE, na="")
+```
+
+```{r}
+for (p in free_param_names) {
+  print(p)
+  print(mle_params[[p]])
+  print(mle_params$loglik)
+}
+```
+
+
+```{r}
+SEED_SIM <- 689144
+SEED_EST <- 941
+NCORES <- 20
+NSIM <- 10000
+K <- 30
+B <- K-1  # bootstrap resamples
+J <- 3
+
+lik_mc <- function(phi,sigma,y,s,J,log=F){
+ lik <- vector("numeric",length(y))
+ for(n in 1:length(y)){
+   set.seed(s+n-1)
+   X <- rnorm(J,mean=phi,sd=sigma)
+   fYgivenX <- dlnorm(y[n],meanlog=X,sdlog=sigma)
+   lik[n] <- mean(fYgivenX)
+ }
+ if(!log) prod(lik) else sum(log(lik))
+}
+
+negloglik_mc_vec <- function(params,y,s,J){
+ -lik_mc(phi=params["phi"],sigma=params["sigma"],y=y,s=s,J=J,log=T)
+}
+
+toy_bootstrap_mc <- function(Ydata,seed,confidence=0.95){
+  mle <- optim(par=c(sigma=2,phi=1),fn=negloglik_mc_vec, method="Nelder-Mead",y=Ydata,s=seed,J=J)
+  bootstrap_params <- matrix(0,nrow=B,ncol=2,dimnames=list(NULL,c("phi","sigma")))
+  for(b in 1:B){
+    set.seed(seed+b)
+    bootstrap_sim <- rlnorm(N,meanlog=mle$par["phi"],sdlog=sqrt(2)*mle$par["sigma"])
+    bootstrap_est <- optim(par=mle$par,fn=negloglik_mc_vec,
+      method="Nelder-Mead",y=bootstrap_sim,s=seed+N*b,J=J)
+    bootstrap_params[b,"sigma"] <- bootstrap_est$par["sigma"] 
+    bootstrap_params[b,"phi"] <- bootstrap_est$par["phi"]
+  }
+  ci_sigma <- unname(quantile(bootstrap_params[,"sigma"],c((1-confidence)/2,(1+confidence)/2)))
+  ci_phi <- unname(quantile(bootstrap_params[,"phi"],c((1-confidence)/2,(1+confidence)/2)))
+  return(list(mle=mle$par,mle_value=-mle$value,
+    #bootstrap_params=bootstrap_params,
+    ci_sigma=ci_sigma,ci_phi=ci_phi))
+}
+
+library(foreach)
+library(doParallel)
+registerDoParallel(NCORES)
+seed_simstudy_sim <- SEED_SIM
+seed_simstudy_bootstrap <- SEED_EST
+Nsim <- NSIM
+
+
+negloglik_mc_vec <- mle_params$loglik
+bs_ci_sim <- foreach(nsim=1:Nsim,.combine=rbind) %dopar% {
+  set.seed(seed_simstudy_sim+nsim)
+  Ysim <- mle_params[["w"]]
+  bs1 <- toy_bootstrap_mc(Ysim,seed=seed_simstudy_bootstrap+nsim*N*(B+1),confidence=0.95)
+  c(phi_lo=bs1$ci_phi[1],phi_hi=bs1$ci_phi[2],sigma_lo=bs1$ci_sigma[1],sigma_hi=bs1$ci_sigma[2])
+}
+stopImplicitCluster()
 ```
 
 ```{r}
@@ -794,6 +863,19 @@ plot_profile <- function(mcap_data, ylab, xline=2.5, yline=2.5, xlab="", quadrat
 
 ```{r}
 # Iterate over all the free parameters in the model to calculate their CIs... may take a while!
+logitTransform <- function(p) { 
+  p <- min(0.99999, max(0.00001, p))
+  return(log(p/(1-p)))
+}
+sigmoidTransform <- function(p) { 1/(1+exp(-p)) }
+
+logTransform <- function(p) { 
+  p <- max(0.00001, p)
+  return(log(p))
+}
+expTransform <- function(p) { exp(p) }
+
+transformVals <- TRUE
 
 if (calculate_mcap_cis) {
   par_names <- row.names(free_param_box)
@@ -807,31 +889,57 @@ if (calculate_mcap_cis) {
     par_range <- seq(row[1], row[2], length=mcap_profdes_len)
     par_range_delta <- (row[2] - row[1]) / (2 * (mcap_profdes_len-1))
     log_likelihoods <- c()
+    par_values <- c()
     for (val in par_range) {
       likelihoods <- subset(mdl, abs(mdl[[name]]-val)<par_range_delta)$loglik
       if (length(likelihoods) == 0) next
       log_likelihoods <- c(log_likelihoods, max(likelihoods))
+      
+      if (is.element(name, logit_trans_params) && transformVals) {
+        logitVal <- logitTransform(val)
+        #par_values <- c(par_values, val)
+        par_values <- c(par_values, logitVal)
+      } else if (is.element(name, log_trans_params) && transformVals) {
+        logVal = logTransform(val)
+        par_values <- c(par_values, logVal)
+      } else {
+        par_values <- c(par_values, val)
+      }
     }
+    par_range <- par_values
     
+    #print(data.frame(par_range, par_values, log_likelihoods))
     par_prof <- data.frame(par_range, log_likelihoods)
+    #par_prof <- data.frame(par_values, log_likelihoods)
+
     # Discarding outlier values that are too low
     Q <- quantile(par_prof$log_likelihoods, probs=c(.25, .75), na.rm = FALSE)
     iqr <- IQR(par_prof$log_likelihoods)
     par_prof <- subset(par_prof, par_prof$log_likelihoods > (Q[1] - 1.5*iqr))
     
-    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
+    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, 0.75, mcap_ngrid[[i]])
+    #x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
     if (i == 1) {
       cis <- data.frame("name" = c(name), "x0" = c(x$ci[1]), "x1" = c(x$ci[2]), stringsAsFactors = FALSE)  
     } else {
       cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))
     }
     
-    print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))    
-    
+    if (is.element(name, logit_trans_params) && transformVals) {
+      print(sprintf("%s %0.2f %0.2f", name, sigmoidTransform(x$ci[1]), sigmoidTransform(x$ci[2])))
+      var_label <- paste("logit(", name, ")")
+    } else if (is.element(name, log_trans_params) && transformVals) {
+      print(sprintf("%s %0.2f %0.2f", name, expTransform(x$ci[1]), expTransform(x$ci[2])))
+      var_label <- paste("log(", name, ")")
+    } else {
+      print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))
+      var_label <- name
+    }
+
     ggplot(x$fit, aes(parameter, quadratic)) + geom_line() + 
       geom_vline(xintercept=c(x$ci[1], x$ci[2]), linetype=4, colour='red') +
       geom_point(data = data.frame('parameters'=par_prof$par_range, 'loglik'=par_prof$log_likelihoods), 
-                 aes(parameters, par_prof$log_likelihoods)) 
+                 aes(parameters, par_prof$log_likelihoods)) + xlab(var_label) + ylab("-loglik")
     ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))
     
     # DEBUGGING - In case the outlier removal still yields loglikelihood cliffs and one 

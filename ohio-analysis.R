@@ -585,6 +585,20 @@ outbreak_size <- function(intervention_week) {
   return(c(final_size, percentage * 100, percentage_2 * 100))
 }
 
+theta_aweek <- theta
+theta_aweek["intervention"] <- start_aware_week
+
+mdl_int %>% 
+  simulate(params=theta_aweek, nsim=num_sims, format = "data.frame", include.data=TRUE) -> data_aweek
+
+reduction_size = c()
+reduction_size_actual = c()
+for (i in seq(1, start_aware_week - 1, length=start_aware_week - 1)) {
+  size = outbreak_size(floor(i))
+  reduction_size = c(reduction_size, size[2])
+  reduction_size_actual = c(reduction_size_actual, size[3])
+}
+
 red_size <- reduction_size
 #red_size <- reduction_size_actual
 
