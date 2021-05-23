@@ -865,7 +865,7 @@ if (calculate_mcap_cis) {
     
     # Getting the CI from the MCAP function and transforming back to the original scale if needed
     x <- mcap(par_prof$log_likelihoods, par_prof$par_values, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
-    tci <- c(0, 0)
+    tci <- x$ci
     if (is.element(name, logit_trans_params)) {
       tci[1] <- sigmoidTransform(x$ci[1])
       tci[2] <- sigmoidTransform(x$ci[2])
