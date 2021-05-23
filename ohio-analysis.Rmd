@@ -41,7 +41,7 @@ PARAMETERS
 ```{r}
 main_folder <- "./ohio"
 
-prop_file = file.path(main_folder, "opt.properties")
+prop_file = file.path(main_folder, "fast.properties")
 prop <- read.properties(prop_file)
 
 output_name <- prop$output_name
@@ -335,138 +335,6 @@ write.csv(theta_opt, file=file.path(output_folder, "param_opt_estimates.csv"), r
 theta_opt
 ```
 
-BOOTSTRAP PARAMETER ESTIMATES AND CONFIDENCE INTERVALS
-
-```{r}
-# Bootstrap parameters
-# https://cran.r-project.org/web/packages/boot/
-# https://www.datacamp.com/community/tutorials/bootstrap-r
-# https://blog.methodsconsultants.com/posts/understanding-bootstrap-confidence-interval-output-from-the-r-boot-package/
-
-bootstrap_confidence <- as.numeric(prop$bootstrap_confidence)
-num_quantiles <- as.numeric(prop$num_quantiles)
-num_bootstrap_replicates <- as.integer(prop$num_bootstrap_replicates)
-use_bootstrap_estimates <- as.logical(prop$use_bootstrap_estimates)
-```
-
-```{r}
-# Getting the mean and CI for the parameters (from bootstrapping the top quantile of the loglik)
-
-# Calculate quantiles
-quantiles <- quantile(mle_params$loglik, prob = seq(0, 1, length = num_quantiles+1), type = 5)
-top_quantile <- quantiles[num_quantiles][[1]]
-
-# Remove outliers
-mle_params_top <- mle_params[top_quantile < mle_params$loglik,]
-
-theta_boot <- theta_opt
-mle_mean_ci <- NULL
-for (p in free_param_names) {
-  p_boot <- boot(mle_params_top[[p]], function(x, i) mean(x[i]), R=num_bootstrap_replicates)
-
-  # Confidence Intervals from the bootstrap:
-  p_boot.ci <- boot.ci(p_boot, conf=bootstrap_confidence, type=c("norm", "basic" ,"perc", "bca"))
-
-  p_mean <- mean(p_boot$t[,1])
-  p_ci_lo <- p_boot.ci$bca[,4]
-  p_ci_hi <- p_boot.ci$bca[,5]
-
-  hist(p_boot$t[,1], col = "darkgray")
-  dev.copy(pdf, file.path(plotting_folder, paste("2-", p, "-bootstrap_values.pdf", sep="")))
-  dev.off()
-
-  print(sprintf("%s %0.2f %0.2f %0.2f", p, p_mean, p_ci_lo, p_ci_hi))
-  
-  if (is.null(mle_mean_ci)) {
-    mle_mean_ci <- data.frame("name" = c(p), "mean" = c(p_mean), "ci_lo" = c(p_ci_lo), "ci_hi" = c(p_ci_hi), stringsAsFactors = FALSE)  
-  } else {
-    mle_mean_ci <- rbind(mle_mean_ci, c(p, p_mean, p_ci_lo, p_ci_hi))  
-  }
-  
-  theta_boot[p] <- p_mean
-}
-
-write.csv(theta_boot, file=file.path(output_folder, "param_bootstrap_estimates.csv"), row.names=TRUE, na="")
-write.csv(mle_mean_ci, file=file.path(output_folder, "param_bootstrap_conf_intervals.csv"), row.names=FALSE, na="")
-```
-
-```{r}
-for (p in free_param_names) {
-  print(p)
-  print(mle_params[[p]])
-  print(mle_params$loglik)
-}
-```
-
-
-```{r}
-SEED_SIM <- 689144
-SEED_EST <- 941
-NCORES <- 20
-NSIM <- 10000
-K <- 30
-B <- K-1  # bootstrap resamples
-J <- 3
-
-lik_mc <- function(phi,sigma,y,s,J,log=F){
- lik <- vector("numeric",length(y))
- for(n in 1:length(y)){
-   set.seed(s+n-1)
-   X <- rnorm(J,mean=phi,sd=sigma)
-   fYgivenX <- dlnorm(y[n],meanlog=X,sdlog=sigma)
-   lik[n] <- mean(fYgivenX)
- }
- if(!log) prod(lik) else sum(log(lik))
-}
-
-negloglik_mc_vec <- function(params,y,s,J){
- -lik_mc(phi=params["phi"],sigma=params["sigma"],y=y,s=s,J=J,log=T)
-}
-
-toy_bootstrap_mc <- function(Ydata,seed,confidence=0.95){
-  mle <- optim(par=c(sigma=2,phi=1),fn=negloglik_mc_vec, method="Nelder-Mead",y=Ydata,s=seed,J=J)
-  bootstrap_params <- matrix(0,nrow=B,ncol=2,dimnames=list(NULL,c("phi","sigma")))
-  for(b in 1:B){
-    set.seed(seed+b)
-    bootstrap_sim <- rlnorm(N,meanlog=mle$par["phi"],sdlog=sqrt(2)*mle$par["sigma"])
-    bootstrap_est <- optim(par=mle$par,fn=negloglik_mc_vec,
-      method="Nelder-Mead",y=bootstrap_sim,s=seed+N*b,J=J)
-    bootstrap_params[b,"sigma"] <- bootstrap_est$par["sigma"] 
-    bootstrap_params[b,"phi"] <- bootstrap_est$par["phi"]
-  }
-  ci_sigma <- unname(quantile(bootstrap_params[,"sigma"],c((1-confidence)/2,(1+confidence)/2)))
-  ci_phi <- unname(quantile(bootstrap_params[,"phi"],c((1-confidence)/2,(1+confidence)/2)))
-  return(list(mle=mle$par,mle_value=-mle$value,
-    #bootstrap_params=bootstrap_params,
-    ci_sigma=ci_sigma,ci_phi=ci_phi))
-}
-
-library(foreach)
-library(doParallel)
-registerDoParallel(NCORES)
-seed_simstudy_sim <- SEED_SIM
-seed_simstudy_bootstrap <- SEED_EST
-Nsim <- NSIM
-
-
-negloglik_mc_vec <- mle_params$loglik
-bs_ci_sim <- foreach(nsim=1:Nsim,.combine=rbind) %dopar% {
-  set.seed(seed_simstudy_sim+nsim)
-  Ysim <- mle_params[["w"]]
-  bs1 <- toy_bootstrap_mc(Ysim,seed=seed_simstudy_bootstrap+nsim*N*(B+1),confidence=0.95)
-  c(phi_lo=bs1$ci_phi[1],phi_hi=bs1$ci_phi[2],sigma_lo=bs1$ci_sigma[1],sigma_hi=bs1$ci_sigma[2])
-}
-stopImplicitCluster()
-```
-
-```{r}
-if (use_bootstrap_estimates) {
-  theta <- theta_boot
-} else {
-  theta <- theta_opt
-}
-```
-
 SIMULATION W/ BEST PARAMETERS
 
 ```{r}
@@ -519,7 +387,7 @@ calc_cumulative_counts <- function(sdat, t0, t1) {
 #set.seed(test_sim_seed)
 
 mdl_int  %>%
-  simulate(params=theta, nsim=9, format="data.frame", include.data=TRUE) -> sim_data
+  simulate(params=theta_opt, nsim=9, format="data.frame", include.data=TRUE) -> sim_data
 
 sim_data %>%
   ggplot(aes(x=time, y=cases, group=.id, color=(.id=="data"))) +
@@ -532,7 +400,7 @@ ggsave(file.path(plotting_folder, "3-simulations_int.pdf"))
 PLOT OHIO OUTBREAK WITHOUT INTERVENTION
 
 ```{r}
-theta_noint <- theta
+theta_noint <- theta_opt
 theta_noint["w"] <- 1
 theta_noint
 ```
@@ -557,7 +425,7 @@ ggsave(file.path(plotting_folder, "3-simulations_noint.pdf"))
 set.seed(full_sim_seed)
 
 mdl_int %>% 
-  simulate(params=theta, nsim=num_sims, format = "data.frame", include.data=TRUE) -> sim_data_int
+  simulate(params=theta_opt, nsim=num_sims, format = "data.frame", include.data=TRUE) -> sim_data_int
 
 mdl_int %>% 
   simulate(params=theta_noint, nsim=num_sims, format = "data.frame", include.data=TRUE) -> sim_data_noint
@@ -648,7 +516,7 @@ SHOW HOW OUTBREAK SIZE CHANGES (comparison to the simulation size AND actual siz
 
 ```{r}
 outbreak_size <- function(intervention_week) {
-  theta_global_int_week <- theta
+  theta_global_int_week <- theta_opt
   theta_global_int_week["intervention"] <- intervention_week
   
   mdl_int %>% 
@@ -678,7 +546,7 @@ outbreak_size <- function(intervention_week) {
 ```
 
 ```{r}
-theta_aweek <- theta
+theta_aweek <- theta_opt
 theta_aweek["intervention"] <- start_aware_week
 
 mdl_int %>% 
@@ -862,7 +730,6 @@ plot_profile <- function(mcap_data, ylab, xline=2.5, yline=2.5, xlab="", quadrat
 ```
 
 ```{r}
-# Iterate over all the free parameters in the model to calculate their CIs... may take a while!
 logitTransform <- function(p) { 
   p <- min(0.99999, max(0.00001, p))
   return(log(p/(1-p)))
@@ -874,8 +741,10 @@ logTransform <- function(p) {
   return(log(p))
 }
 expTransform <- function(p) { exp(p) }
+```
 
-transformVals <- TRUE
+```{r}
+# Iterate over all the free parameters in the model to calculate their CIs... may take a while!
 
 if (calculate_mcap_cis) {
   par_names <- row.names(free_param_box)
@@ -895,62 +764,60 @@ if (calculate_mcap_cis) {
       if (length(likelihoods) == 0) next
       log_likelihoods <- c(log_likelihoods, max(likelihoods))
       
-      if (is.element(name, logit_trans_params) && transformVals) {
+      if (is.element(name, logit_trans_params)) {
         logitVal <- logitTransform(val)
-        #par_values <- c(par_values, val)
         par_values <- c(par_values, logitVal)
-      } else if (is.element(name, log_trans_params) && transformVals) {
+      } else if (is.element(name, log_trans_params)) {
         logVal = logTransform(val)
         par_values <- c(par_values, logVal)
       } else {
         par_values <- c(par_values, val)
       }
     }
-    par_range <- par_values
-    
-    #print(data.frame(par_range, par_values, log_likelihoods))
-    par_prof <- data.frame(par_range, log_likelihoods)
-    #par_prof <- data.frame(par_values, log_likelihoods)
 
     # Discarding outlier values that are too low
+    par_prof <- data.frame(par_values, log_likelihoods)
     Q <- quantile(par_prof$log_likelihoods, probs=c(.25, .75), na.rm = FALSE)
     iqr <- IQR(par_prof$log_likelihoods)
     par_prof <- subset(par_prof, par_prof$log_likelihoods > (Q[1] - 1.5*iqr))
     
-    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, 0.75, mcap_ngrid[[i]])
-    #x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
-    if (i == 1) {
-      cis <- data.frame("name" = c(name), "x0" = c(x$ci[1]), "x1" = c(x$ci[2]), stringsAsFactors = FALSE)  
-    } else {
-      cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))
-    }
-    
-    if (is.element(name, logit_trans_params) && transformVals) {
-      print(sprintf("%s %0.2f %0.2f", name, sigmoidTransform(x$ci[1]), sigmoidTransform(x$ci[2])))
+    # Getting the CI from the MCAP function and transforming back to the original scale if needed
+    x <- mcap(par_prof$log_likelihoods, par_prof$par_values, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
+    tci <- c(0, 0)
+    if (is.element(name, logit_trans_params)) {
+      tci[1] <- sigmoidTransform(x$ci[1])
+      tci[2] <- sigmoidTransform(x$ci[2])
       var_label <- paste("logit(", name, ")")
-    } else if (is.element(name, log_trans_params) && transformVals) {
-      print(sprintf("%s %0.2f %0.2f", name, expTransform(x$ci[1]), expTransform(x$ci[2])))
+    } else if (is.element(name, log_trans_params)) {
+      tci[1] <- expTransform(x$ci[1])
+      tci[2] <- expTransform(x$ci[2])
       var_label <- paste("log(", name, ")")
     } else {
-      print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))
       var_label <- name
     }
+    print(sprintf("%s %0.2f %0.2f", name, tci[1], tci[2]))
 
     ggplot(x$fit, aes(parameter, quadratic)) + geom_line() + 
       geom_vline(xintercept=c(x$ci[1], x$ci[2]), linetype=4, colour='red') +
-      geom_point(data = data.frame('parameters'=par_prof$par_range, 'loglik'=par_prof$log_likelihoods), 
+      geom_point(data = data.frame('parameters'=par_prof$par_values, 'loglik'=par_prof$log_likelihoods), 
                  aes(parameters, par_prof$log_likelihoods)) + xlab(var_label) + ylab("-loglik")
     ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))
-    
+
+    if (i == 1) {
+      mcap_cis <- data.frame("name" = c(name), "x0" = c(tci[1]), "x1" = c(tci[2]), stringsAsFactors = FALSE)  
+    } else {
+      mcap_cis <- rbind(mcap_cis, c(name, tci[1], tci[2]))
+    }    
+        
     # DEBUGGING - In case the outlier removal still yields loglikelihood cliffs and one 
     # needs to remove values manually. Some discussion here:
     # https://github.com/kingaa/pomp/discussions/145
-    #par_prof_orig <- data.frame(par_range, log_likelihoods)
+    #par_prof_orig <- data.frame(par_values, log_likelihoods)
     #print(par_prof_orig)
     #xdeb <- mcap(par_prof_orig$log_likelihoods, par_prof_orig$par_rang)
     #plot_profile(xdeb)
     #ggsave(file.path(plotting_folder, paste("6-", name, "_all_loglik_ci.pdf", sep="")))
   }
-  write.csv(cis, file=file.path(output_folder, "param_mcap_confidence_intervals.csv"), row.names=FALSE, na="")  
+  write.csv(mcap_cis, file=file.path(output_folder, "param_mcap_confidence_intervals.csv"), row.names=FALSE, na="")  
 }
 ```

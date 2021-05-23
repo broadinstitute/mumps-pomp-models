@@ -5,16 +5,16 @@ lm(formula = red_size ~ time, data = data.frame(time = seq(1,
 
 Residuals:
     Min      1Q  Median      3Q     Max 
--23.471  -4.968   2.061   8.053  11.168 
+-25.135  -4.453   1.620   8.906  11.039 
 
 Coefficients:
             Estimate Std. Error t value Pr(>|t|)    
-(Intercept)  113.437      7.327  15.483 8.56e-08 ***
-time          -4.406      1.080  -4.078  0.00276 ** 
+(Intercept)  113.385      7.533   15.05 1.09e-07 ***
+time          -3.954      1.111   -3.56  0.00612 ** 
 ---
 Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
-Residual standard error: 11.33 on 9 degrees of freedom
-Multiple R-squared:  0.6489,	Adjusted R-squared:  0.6099 
-F-statistic: 16.63 on 1 and 9 DF,  p-value: 0.002764
+Residual standard error: 11.65 on 9 degrees of freedom
+Multiple R-squared:  0.5847,	Adjusted R-squared:  0.5386 
+F-statistic: 12.67 on 1 and 9 DF,  p-value: 0.00612
 

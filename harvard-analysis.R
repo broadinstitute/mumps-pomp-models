@@ -338,61 +338,6 @@ write.csv(theta_opt, file=file.path(output_folder, "param_opt_estimates.csv"), r
 theta_opt
 
 # =============================================================================
-# BOOTSTRAP PARAMETER ESTIMATES AND CONFIDENCE INTERVALS
-
-# Bootstrap parameters
-
-bootstrap_confidence <- as.numeric(prop$bootstrap_confidence)
-num_quantiles <- as.numeric(prop$num_quantiles)
-num_bootstrap_replicates <- as.integer(prop$num_bootstrap_replicates)
-use_bootstrap_estimates <- as.logical(prop$use_bootstrap_estimates)
-
-# Getting the mean and CI for the parameters (from bootstrapping the top quantile of the loglik)
-
-# Calculate quantiles
-quantiles <- quantile(mle_params$loglik, prob = seq(0, 1, length = num_quantiles+1), type = 5)
-top_quantile <- quantiles[num_quantiles][[1]]
-
-# Remove outliers
-mle_params_top <- mle_params[top_quantile < mle_params$loglik,]
-
-theta_boot <- theta_opt
-mle_mean_ci <- NULL
-for (p in free_param_names) {
-  p_boot <- boot(mle_params_top[[p]], function(x, i) mean(x[i]), R=num_bootstrap_replicates)
-
-  # Confidence Intervals from the bootstrap:
-  p_boot.ci <- boot.ci(p_boot, conf=bootstrap_confidence, type=c("norm", "basic" ,"perc", "bca"))
-
-  p_mean <- mean(p_boot$t[,1])
-  p_ci_lo <- p_boot.ci$bca[,4]
-  p_ci_hi <- p_boot.ci$bca[,5]
-
-  pdf(file=file.path(plotting_folder, paste("2-", p, "-bootstrap_values.pdf", sep="")))
-  hist(p_boot$t[,1], col = "darkgray")
-  dev.off()
-
-  print(sprintf("%s %0.2f %0.2f %0.2f", p, p_mean, p_ci_lo, p_ci_hi))
-  
-  if (is.null(mle_mean_ci)) {
-    mle_mean_ci <- data.frame("name" = c(p), "mean" = c(p_mean), "ci_lo" = c(p_ci_lo), "ci_hi" = c(p_ci_hi), stringsAsFactors = FALSE)  
-  } else {
-    mle_mean_ci <- rbind(mle_mean_ci, c(p, p_mean, p_ci_lo, p_ci_hi))  
-  }
-  
-  theta_boot[p] <- p_mean
-}
-
-write.csv(theta_boot, file=file.path(output_folder, "param_bootstrap_estimates.csv"), row.names=TRUE, na="")
-write.csv(mle_mean_ci, file=file.path(output_folder, "param_bootstrap_conf_intervals.csv"), row.names=FALSE, na="")
-
-if (use_bootstrap_estimates) {
-  theta <- theta_boot
-} else {
-  theta <- theta_opt
-}
-
-# =============================================================================
 # SIMULATION W/ BEST PARAMETERS
 
 # Some utility functions to calculate cumulative case numbers
@@ -480,7 +425,7 @@ calc_cumulative_counts <- function(sdat, len) {
 #set.seed(test_sim_seed)
 
 mdl_int  %>%
-  simulate(params=theta, nsim=9, format="data.frame", include.data=TRUE) -> sim_data
+  simulate(params=theta_opt, nsim=9, format="data.frame", include.data=TRUE) -> sim_data
 
 sim_data %>%
   ggplot(aes(x=time, y=cases, group=.id, color=(.id=="data"))) +
@@ -492,7 +437,7 @@ ggsave(file.path(plotting_folder, "3-simulations_int.pdf"))
 # =============================================================================
 # PLOT HARVARD OUTBREAK WITHOUT INTERVENTION
 
-theta_noq <- theta
+theta_noq <- theta_opt
 theta_noq["q"] <- 1
 
 #set.seed(test_sim_seed)
@@ -515,7 +460,7 @@ ggsave(file.path(plotting_folder, "3-simulations_noint.pdf"))
 set.seed(full_sim_seed)
 
 mdl_int %>% 
-  simulate(params=theta, nsim=num_sims, format = "data.frame", include.data=TRUE) %>% 
+  simulate(params=theta_opt, nsim=num_sims, format = "data.frame", include.data=TRUE) %>% 
   rem_low_count_simulations(num_sims) -> sim_data_int
 
 mdl_int %>% 
@@ -603,7 +548,7 @@ cumulative_area_plot(sim_data_noint, cmax, "4-cumulative_cases_percentiles-compa
 # SHOW HOW OUTBREAK SIZE CHANGES (comparison to the simulation size AND actual size)
 
 outbreak_size <- function(intervention_day) {
-  theta_global_int_day <- theta
+  theta_global_int_day <- theta_opt
   theta_global_int_day["intervention"] <- intervention_day
   
   mdl_int %>% 
@@ -631,7 +576,7 @@ outbreak_size <- function(intervention_day) {
   return(c(final_size, percentage * 100, percentage_2 * 100))
 }
 
-theta_dday <- theta
+theta_dday <- theta_opt
 theta_dday["intervention"] <- new_diag_day
 
 mdl_int %>% 
@@ -792,6 +737,18 @@ plik <- function(pname, pval0, pval1) {
   return(pmodel)
 }
 
+logitTransform <- function(p) {
+  p <- min(0.99999, max(0.00001, p))
+  return(log(p/(1-p)))
+}
+sigmoidTransform <- function(p) { 1/(1+exp(-p)) }
+
+logTransform <- function(p) { 
+  p <- max(0.00001, p)
+  return(log(p))
+}
+expTransform <- function(p) { exp(p) }
+
 # Iterate over all the free parameters in the model to calculate their CIs... may take a while!
 
 if (calculate_mcap_cis) {
@@ -806,33 +763,56 @@ if (calculate_mcap_cis) {
     par_range <- seq(row[1], row[2], length=mcap_profdes_len)
     par_range_delta <- (row[2] - row[1]) / (2 * (mcap_profdes_len-1))
     log_likelihoods <- c()
+    par_values <- c()
     for (val in par_range) {
       likelihoods <- subset(mdl, abs(mdl[[name]]-val)<par_range_delta)$loglik
       if (length(likelihoods) == 0) next
       log_likelihoods <- c(log_likelihoods, max(likelihoods))
+      
+      if (is.element(name, logit_trans_params)) {
+        logitVal <- logitTransform(val)
+        par_values <- c(par_values, logitVal)
+      } else if (is.element(name, log_trans_params)) {
+        logVal = logTransform(val)
+        par_values <- c(par_values, logVal)
+      } else {
+        par_values <- c(par_values, val)
+      }
     }
     
-    par_prof <- data.frame(par_range, log_likelihoods)
     # Discarding outlier values that are too low
+    par_prof <- data.frame(par_values, log_likelihoods)
     Q <- quantile(par_prof$log_likelihoods, probs=c(.25, .75), na.rm = FALSE)
     iqr <- IQR(par_prof$log_likelihoods)
     par_prof <- subset(par_prof, par_prof$log_likelihoods > (Q[1] - 1.5*iqr))
     
-    x <- mcap(par_prof$log_likelihoods, par_prof$par_range, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
-    if (i == 1) {
-      cis <- data.frame("name" = c(name), "x0" = c(x$ci[1]), "x1" = c(x$ci[2]), stringsAsFactors = FALSE)  
+    # Getting the CI from the MCAP function and transforming back to the original scale if needed
+    x <- mcap(par_prof$log_likelihoods, par_prof$par_values, mcap_confidence, mcap_lambda[[i]], mcap_ngrid[[i]])
+    tci <- c(0, 0)
+    if (is.element(name, logit_trans_params)) {
+      tci[1] <- sigmoidTransform(x$ci[1])
+      tci[2] <- sigmoidTransform(x$ci[2])
+      var_label <- paste("logit(", name, ")")
+    } else if (is.element(name, log_trans_params)) {
+      tci[1] <- expTransform(x$ci[1])
+      tci[2] <- expTransform(x$ci[2])
+      var_label <- paste("log(", name, ")")
     } else {
-      cis <- rbind(cis, c(name, x$ci[1], x$ci[2]))
+      var_label <- name
     }
-    
-    print(sprintf("%s %0.2f %0.2f", name, x$ci[1], x$ci[2]))    
+    print(sprintf("%s %0.2f %0.2f", name, tci[1], tci[2]))
     
     ggplot(x$fit, aes(parameter, quadratic)) + geom_line() + 
       geom_vline(xintercept=c(x$ci[1], x$ci[2]), linetype=4, colour='red') +
-      geom_point(data = data.frame('parameters'=par_prof$par_range, 'loglik'=par_prof$log_likelihoods), 
-                 aes(parameters, par_prof$log_likelihoods)) 
+      geom_point(data = data.frame('parameters'=par_prof$par_values, 'loglik'=par_prof$log_likelihoods), 
+                 aes(parameters, par_prof$log_likelihoods)) + xlab(var_label) + ylab("-loglik")
     ggsave(file.path(plotting_folder, paste("6-", name, "_ci.pdf", sep="")))
+    
+    if (i == 1) {
+      mcap_cis <- data.frame("name" = c(name), "x0" = c(tci[1]), "x1" = c(tci[2]), stringsAsFactors = FALSE)  
+    } else {
+      mcap_cis <- rbind(mcap_cis, c(name, tci[1], tci[2]))
+    }
   }
-  
-  write.csv(cis, file=file.path(output_folder, "param_mcap_confidence_intervals.csv"), row.names=FALSE, na="")
+  write.csv(mcap_cis, file=file.path(output_folder, "param_mcap_confidence_intervals.csv"), row.names=FALSE, na="")  
 }
